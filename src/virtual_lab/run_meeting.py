@@ -92,7 +92,9 @@ def run_meeting(
     start_time = time.time()
 
     # Set up client
-    client = OpenAI()
+    base_url = os.getenv("OPENAI_BASE_URL")
+    api_key  = os.getenv("OPENAI_API_KEY", "dummy")
+    client = OpenAI(base_url=base_url, api_key=api_key)
 
     # Set up team
     if meeting_type == "team":
