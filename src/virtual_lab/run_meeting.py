@@ -1,6 +1,6 @@
 """Runs a meeting with LLM agents."""
 
-import time
+import os, time
 from pathlib import Path
 from typing import Literal
 
