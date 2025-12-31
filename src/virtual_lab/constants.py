@@ -1,8 +1,8 @@
 """Holds constants."""
 
-DEFAULT_MODEL = "llama3" # "gpt-4o-2024-08-06"
+DEFAULT_MODEL = "llama3" # "gpt-5.2"
 
-# Prices in USD as of January 18, 2025 (https://openai.com/api/pricing/)
+# Prices in USD as of December 30, 2025 (https://openai.com/api/pricing/)
 MODEL_TO_INPUT_PRICE_PER_TOKEN = {
     "gpt-3.5-turbo-0125": 0.5 / 10**6,
     "gpt-4o-2024-08-06": 2.5 / 10**6,
@@ -10,6 +10,11 @@ MODEL_TO_INPUT_PRICE_PER_TOKEN = {
     "gpt-4o-mini-2024-07-18": 0.15 / 10**6,
     "o1-mini-2024-09-12": 3 / 10**6,
     "llama3": 0,
+    "gpt-5": 1.25 / 10**6,
+    "gpt-5-mini": 0.25 / 10**6,
+    "gpt-5-nano": 0.05 / 10**6,
+    "gpt-5.2": 1.75 / 10**6,
+    "gpt-5.2-pro": 21 / 10**6,
 }
 
 MODEL_TO_OUTPUT_PRICE_PER_TOKEN = {
@@ -19,6 +24,11 @@ MODEL_TO_OUTPUT_PRICE_PER_TOKEN = {
     "gpt-4o-mini-2024-07-18": 0.6 / 10**6,
     "o1-mini-2024-09-12": 12 / 10**6,
     "llama3": 0,
+    "gpt-5": 10 / 10**6,
+    "gpt-5-mini": 2 / 10**6,
+    "gpt-5-nano": 0.4 / 10**6,
+    "gpt-5.2": 14 / 10**6,
+    "gpt-5.2-pro": 168 / 10**6,
 }
 
 FINETUNING_MODEL_TO_INPUT_PRICE_PER_TOKEN = {

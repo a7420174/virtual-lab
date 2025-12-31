@@ -6,8 +6,8 @@ from pathlib import Path
 
 import requests
 import tiktoken
-from openai import AsyncOpenAI, OpenAI
-from openai.types.beta.threads.run import Run
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 
 from virtual_lab.constants import (
     DEFAULT_FINETUNING_EPOCHS,
@@ -19,9 +19,7 @@ from virtual_lab.constants import (
 from virtual_lab.prompts import format_references
 
 
-def get_pubmed_central_article(
-    pmcid: str, abstract_only: bool = False
-) -> tuple[str | None, list[str] | None]:
+def get_pubmed_central_article(pmcid: str, abstract_only: bool = False) -> tuple[str | None, list[str] | None]:
     """Gets the title and content (abstract or full text) of a PubMed Central article given a PMC ID.
 
     Note: This only returns main text, ignoring tables, figures, and references.
@@ -46,32 +44,19 @@ def get_pubmed_central_article(
     document = article[0]["documents"][0]
 
     # Get title
-    title = next(
-        passage["text"]
-        for passage in document["passages"]
-        if passage["infons"]["section_type"] == "TITLE"
-    )
+    title = next(passage["text"] for passage in document["passages"] if passage["infons"]["section_type"] == "TITLE")
 
     # Get relevant passages
-    passages = [
-        passage
-        for passage in document["passages"]
-        if passage["infons"]["type"] in {"abstract", "paragraph"}
-    ]
+    passages = [passage for passage in document["passages"] if passage["infons"]["type"] in {"abstract", "paragraph"}]
 
     # Get abstract or full text of article (excluding references)
     if abstract_only:
-        passages = [
-            passage
-            for passage in passages
-            if passage["infons"]["section_type"] in ["ABSTRACT"]
-        ]
+        passages = [passage for passage in passages if passage["infons"]["section_type"] in ["ABSTRACT"]]
     else:
         passages = [
             passage
             for passage in passages
-            if passage["infons"]["section_type"]
-            in ["ABSTRACT", "INTRO", "RESULTS", "DISCUSS", "CONCL", "METHODS"]
+            if passage["infons"]["section_type"] in ["ABSTRACT", "INTRO", "RESULTS", "DISCUSS", "CONCL", "METHODS"]
         ]
 
     # Get content
@@ -80,9 +65,7 @@ def get_pubmed_central_article(
     return title, content
 
 
-def run_pubmed_search(
-    query: str, num_articles: int = 3, abstract_only: bool = False
-) -> str:
+def run_pubmed_search(query: str, num_articles: int = 3, abstract_only: bool = False) -> str:
     """Runs a PubMed search, returning the full text of the top matching article.
 
     :param query: The query to search PubMed with.
@@ -92,7 +75,7 @@ def run_pubmed_search(
     """
     # Print search query
     print(
-        f'Searching PubMed Central for {num_articles} articles ({'abstracts' if abstract_only else 'full text'}) with query: "{query}"'
+        f'Searching PubMed Central for {num_articles} articles ({"abstracts" if abstract_only else "full text"}) with query: "{query}"'
     )
 
     # Perform PubMed Central search for query to get PMC ID
@@ -119,7 +102,7 @@ def run_pubmed_search(
         if title is None:
             continue
 
-        texts.append(f"PMCID = {pmcid}\n\nTitle = {title}\n\n{'\n\n'.join(content)}")
+        texts.append(f"PMCID = {pmcid}\n\nTitle = {title}\n\n{'\n\n'.join(content or [])}")
         titles.append(title)
         pmcids.append(pmcid)
 
@@ -141,123 +124,38 @@ def run_pubmed_search(
     return combined_text
 
 
-def run_tools(run: Run) -> list[dict[str, str]]:
-    """Runs the tools in a required action.
+def run_tools(
+    tool_calls: list[ChatCompletionMessageToolCall],
+) -> tuple[list[str], list[ChatCompletionMessageParam]]:
+    """Runs the tools from chat completion tool calls.
 
-    :param run: The run to run tools for.
-    :return: A list of tool outputs.
+    :param tool_calls: The tool calls from the chat completion response.
+    :return: A tuple of (tool outputs as strings, tool response messages for API).
     """
-    # Define the list to store tool outputs
-    tool_outputs = []
+    tool_outputs: list[str] = []
+    tool_messages: list[ChatCompletionMessageParam] = []
 
-    # Loop through each tool in the required action and run it
-    for tool in run.required_action.submit_tool_outputs.tool_calls:
-        if tool.function.name == PUBMED_TOOL_NAME:
-            # Extract the query from the tool arguments
-            args_dict = json.loads(tool.function.arguments)
+    for tool_call in tool_calls:
+        if tool_call.function.name == PUBMED_TOOL_NAME:
+            # Extract the arguments from the tool call
+            args_dict = json.loads(tool_call.function.arguments)
 
-            # Run the tool and append the output to the list of tool outputs
-            tool_outputs.append(
+            # Run the tool
+            output = run_pubmed_search(**args_dict)
+            tool_outputs.append(output)
+
+            # Create tool response message for the API
+            tool_messages.append(
                 {
-                    "tool_call_id": tool.id,
-                    "output": run_pubmed_search(**args_dict),
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": output,
                 }
             )
         else:
-            raise ValueError(f"Unknown tool: {tool.function.name}")
+            raise ValueError(f"Unknown tool: {tool_call.function.name}")
 
-    return tool_outputs
-
-
-def get_messages(client: OpenAI, thread_id: str) -> list[dict]:
-    """Gets messages from a thread.
-
-    :param client: The OpenAI client.
-    :param thread_id: The ID of the thread to get messages from.
-    :return: A list of messages.
-    """
-    # Set up
-    messages = []
-    last_message = None
-    params = {
-        "thread_id": thread_id,
-        "limit": 100,
-        "order": "asc",
-    }
-
-    # Get all messages from the thread page by page
-    while True:
-        # Set up params
-        if last_message is not None:
-            params["after"] = last_message["id"]
-        elif "after" in params:
-            del params["after"]
-
-        # Get messages
-        new_messages = [
-            message.to_dict() for message in client.beta.threads.messages.list(**params)
-        ]
-
-        # Append new messages
-        messages += new_messages
-
-        # Break if no more messages
-        if len(new_messages) < params["limit"]:
-            break
-
-        # Get last message
-        last_message = messages[-1]
-
-    # Verify all message content is length 1
-    assert all(len(message["content"]) == 1 for message in messages)
-
-    return messages
-
-
-async def async_get_messages(client: AsyncOpenAI, thread_id: str) -> list[dict]:
-    """Gets messages from a thread.
-
-    :param client: The async OpenAI client.
-    :param thread_id: The ID of the thread to get messages from.
-    :return: A list of messages.
-    """
-    # Set up
-    messages = []
-    last_message = None
-    params = {
-        "thread_id": thread_id,
-        "limit": 100,
-        "order": "asc",
-    }
-
-    # Get all messages from the thread page by page
-    while True:
-        # Set up params
-        if last_message is not None:
-            params["after"] = last_message["id"]
-        elif "after" in params:
-            del params["after"]
-
-        # Get messages
-        new_messages = [
-            message.to_dict()
-            async for message in client.beta.threads.messages.list(**params)
-        ]
-
-        # Append new messages
-        messages += new_messages
-
-        # Break if no more messages
-        if len(new_messages) < params["limit"]:
-            break
-
-        # Get last message
-        last_message = messages[-1]
-
-    # Verify all message content is length 1
-    assert all(len(message["content"]) == 1 for message in messages)
-
-    return messages
+    return tool_outputs, tool_messages
 
 
 def count_tokens(string: str, encoding_name: str = "cl100k_base") -> int:
@@ -290,9 +188,7 @@ def update_token_counts(
     token_counts["input"] += new_input_token_count
     token_counts["output"] += new_output_token_count
 
-    token_counts["max"] = max(
-        token_counts["max"], new_input_token_count + new_output_token_count
-    )
+    token_counts["max"] = max(token_counts["max"], new_input_token_count + new_output_token_count)
 
 
 def count_discussion_tokens(
@@ -320,9 +216,27 @@ def count_discussion_tokens(
     return token_counts
 
 
-def compute_token_cost(
-    model: str, input_token_count: int, output_token_count: int
-) -> float:
+def _find_model_price_key(model: str, price_dict: dict[str, float]) -> str | None:
+    """Finds the matching key in a price dictionary for a model.
+
+    First checks for an exact match, then finds the longest prefix match.
+
+    :param model: The name of the model.
+    :param price_dict: The price dictionary to search.
+    :return: The matching key or None if no match found.
+    """
+    if model in price_dict:
+        return model
+
+    # Find the longest prefix match
+    matching_keys = [key for key in price_dict if model.startswith(key)]
+    if matching_keys:
+        return max(matching_keys, key=len)
+
+    return None
+
+
+def compute_token_cost(model: str, input_token_count: int, output_token_count: int) -> float:
     """Computes the token cost of a model given input and output token counts.
 
     :param model: The name of the model.
@@ -330,15 +244,15 @@ def compute_token_cost(
     :param output_token_count: The number of tokens in the output.
     :return: The token cost of the model.
     """
-    if (
-        model not in MODEL_TO_INPUT_PRICE_PER_TOKEN
-        or model not in MODEL_TO_OUTPUT_PRICE_PER_TOKEN
-    ):
+    input_key = _find_model_price_key(model, MODEL_TO_INPUT_PRICE_PER_TOKEN)
+    output_key = _find_model_price_key(model, MODEL_TO_OUTPUT_PRICE_PER_TOKEN)
+
+    if input_key is None or output_key is None:
         raise ValueError(f'Cost of model "{model}" not known')
 
     return (
-        input_token_count * MODEL_TO_INPUT_PRICE_PER_TOKEN[model]
-        + output_token_count * MODEL_TO_OUTPUT_PRICE_PER_TOKEN[model]
+        input_token_count * MODEL_TO_INPUT_PRICE_PER_TOKEN[input_key]
+        + output_token_count * MODEL_TO_OUTPUT_PRICE_PER_TOKEN[output_key]
     )
 
 
@@ -368,9 +282,7 @@ def print_cost_and_time(
     print(f"Time: {int(elapsed_time // 60)}:{int(elapsed_time % 60):02d}")
 
 
-def compute_finetuning_cost(
-    model: str, token_count: int, num_epochs: int = DEFAULT_FINETUNING_EPOCHS
-) -> float:
+def compute_finetuning_cost(model: str, token_count: int, num_epochs: int = DEFAULT_FINETUNING_EPOCHS) -> float:
     """Computes the cost of fine-tuning a model.
 
     :param model: The model that will be finetuned.
@@ -381,31 +293,7 @@ def compute_finetuning_cost(
     if model not in FINETUNING_MODEL_TO_TRAINING_PRICE_PER_TOKEN:
         raise ValueError(f'Cost of model "{model}" not known')
 
-    return (
-        token_count * FINETUNING_MODEL_TO_TRAINING_PRICE_PER_TOKEN[model] * num_epochs
-    )
-
-
-def convert_messages_to_discussion(
-    messages: list[dict], assistant_id_to_title: dict[str, str]
-) -> list[dict[str, str]]:
-    """Converts OpenAI messages into discussion format (list of message dictionaries).
-
-    :param messages: The messages to convert.
-    :param assistant_id_to_title: A dictionary mapping assistant IDs to titles.
-    :return: The discussion format (list of message dictionaries).
-    """
-    return [
-        {
-            "agent": (
-                assistant_id_to_title[message["assistant_id"]]
-                if message["assistant_id"] is not None
-                else "User"
-            ),
-            "message": message["content"][0]["text"]["value"],
-        }
-        for message in messages
-    ]
+    return token_count * FINETUNING_MODEL_TO_TRAINING_PRICE_PER_TOKEN[model] * num_epochs
 
 
 def get_summary(discussion: list[dict[str, str]]) -> str:
@@ -432,9 +320,7 @@ def load_summaries(discussion_paths: list[Path]) -> tuple[str, ...]:
     return tuple(summaries)
 
 
-def save_meeting(
-    save_dir: Path, save_name: str, discussion: list[dict[str, str]]
-) -> None:
+def save_meeting(save_dir: Path, save_name: str, discussion: list[dict[str, str]]) -> None:
     """Save a meeting discussion to JSON and Markdown files.
 
     :param save_dir: The directory to save the discussion.
@@ -449,6 +335,6 @@ def save_meeting(
         json.dump(discussion, f, indent=4)
 
     # Save the discussion as Markdown
-    with open(save_dir / f"{save_name}.md", "w") as file:
+    with open(save_dir / f"{save_name}.md", "w", encoding="utf-8") as file:
         for turn in discussion:
             file.write(f"## {turn['agent']}\n\n{turn['message']}\n\n")

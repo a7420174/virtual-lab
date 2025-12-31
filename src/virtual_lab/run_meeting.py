@@ -4,7 +4,8 @@ import os, time
 from pathlib import Path
 from typing import Literal
 
-from openai import OpenAI
+from openai import OpenAI, NOT_GIVEN
+from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionMessageParam, ChatCompletionToolParam
 from tqdm import trange, tqdm
 
 from virtual_lab.agent import Agent
@@ -21,10 +22,8 @@ from virtual_lab.prompts import (
     team_meeting_team_member_prompt,
 )
 from virtual_lab.utils import (
-    convert_messages_to_discussion,
     count_discussion_tokens,
     count_tokens,
-    get_messages,
     get_summary,
     print_cost_and_time,
     run_tools,
@@ -48,7 +47,7 @@ def run_meeting(
     temperature: float = CONSISTENT_TEMPERATURE,
     pubmed_search: bool = False,
     return_summary: bool = False,
-) -> str:
+) -> str | None:
     """Runs a meeting with a LLM agents.
 
     :param meeting_type: The type of meeting.
@@ -82,9 +81,7 @@ def run_meeting(
         if team_member is None:
             raise ValueError("Individual meeting requires individual team member")
         if team_lead is not None or team_members is not None:
-            raise ValueError(
-                "Individual meeting does not require team lead or team members"
-            )
+            raise ValueError("Individual meeting does not require team lead or team members")
     else:
         raise ValueError(f"Invalid meeting type: {meeting_type}")
 
@@ -98,51 +95,43 @@ def run_meeting(
 
     # Set up team
     if meeting_type == "team":
-        team = [team_lead] + list(team_members)
+        assert team_lead is not None and team_members is not None
+        team: list[Agent] = [team_lead] + list(team_members)
+        primary_model = team_lead.model
     else:
-        team = [team_member] + [SCIENTIFIC_CRITIC]
+        assert team_member is not None
+        team = [team_member, SCIENTIFIC_CRITIC]
+        primary_model = team_member.model
 
     # Set up tools
-    assistant_params = {"tools": [PUBMED_TOOL_DESCRIPTION]} if pubmed_search else {}
-
-    # Set up the assistants
-    agent_to_assistant = {
-        agent: client.beta.assistants.create(
-            name=agent.title,
-            instructions=agent.prompt,
-            model=agent.model,
-            **assistant_params,
-        )
-        for agent in team
-    }
-
-    # Map assistant IDs to agents
-    assistant_id_to_title = {
-        assistant.id: agent.title for agent, assistant in agent_to_assistant.items()
-    }
+    tools: list[ChatCompletionToolParam] | None = (
+        [ChatCompletionToolParam(**PUBMED_TOOL_DESCRIPTION)] if pubmed_search else None  # type: ignore[misc]
+    )
 
     # Set up tool token count
     tool_token_count = 0
 
-    # Set up the thread
-    thread = client.beta.threads.create()
+    # Initialize discussion (list of agent/message dicts for output)
+    discussion: list[dict[str, str]] = []
+
+    # Initialize messages for API calls
+    messages: list[ChatCompletionMessageParam] = []
 
     # Initial prompt for team meeting
     if meeting_type == "team":
-        client.beta.threads.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=team_meeting_start_prompt(
-                team_lead=team_lead,
-                team_members=team_members,
-                agenda=agenda,
-                agenda_questions=agenda_questions,
-                agenda_rules=agenda_rules,
-                summaries=summaries,
-                contexts=contexts,
-                num_rounds=num_rounds,
-            ),
+        assert team_lead is not None and team_members is not None
+        initial_content = team_meeting_start_prompt(
+            team_lead=team_lead,
+            team_members=team_members,
+            agenda=agenda,
+            agenda_questions=agenda_questions,
+            agenda_rules=agenda_rules,
+            summaries=summaries,
+            contexts=contexts,
+            num_rounds=num_rounds,
         )
+        messages.append({"role": "user", "content": initial_content})
+        discussion.append({"agent": "User", "message": initial_content})
 
     # Loop through rounds
     for round_index in trange(num_rounds + 1, desc="Rounds (+ Final Round)"):
@@ -152,12 +141,11 @@ def run_meeting(
         for agent in tqdm(team, desc="Team"):
             # Prompt based on agent and round number
             if meeting_type == "team":
+                assert team_lead is not None
                 # Team meeting prompts
                 if agent == team_lead:
                     if round_index == 0:
-                        prompt = team_meeting_team_lead_initial_prompt(
-                            team_lead=team_lead
-                        )
+                        prompt = team_meeting_team_lead_initial_prompt(team_lead=team_lead)
                     elif round_index == num_rounds:
                         prompt = team_meeting_team_lead_final_prompt(
                             team_lead=team_lead,
@@ -176,11 +164,10 @@ def run_meeting(
                         team_member=agent, round_num=round_num, num_rounds=num_rounds
                     )
             else:
+                assert team_member is not None
                 # Individual meeting prompts
                 if agent == SCIENTIFIC_CRITIC:
-                    prompt = individual_meeting_critic_prompt(
-                        critic=SCIENTIFIC_CRITIC, agent=team_member
-                    )
+                    prompt = individual_meeting_critic_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
                 else:
                     if round_index == 0:
                         prompt = individual_meeting_start_prompt(
@@ -192,65 +179,70 @@ def run_meeting(
                             contexts=contexts,
                         )
                     else:
-                        prompt = individual_meeting_agent_prompt(
-                            critic=SCIENTIFIC_CRITIC, agent=team_member
-                        )
+                        prompt = individual_meeting_agent_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
 
-            # Create message from user to agent
-            client.beta.threads.messages.create(
-                thread_id=thread.id,
-                role="user",
-                content=prompt,
-            )
+            # Add prompt as user message
+            messages.append({"role": "user", "content": prompt})
+            discussion.append({"agent": "User", "message": prompt})
 
-            # Run the agent
-            run = client.beta.threads.runs.create_and_poll(
-                thread_id=thread.id,
-                assistant_id=agent_to_assistant[agent].id,
+            # Build messages for this agent with their system prompt
+            agent_messages: list[ChatCompletionMessageParam] = [agent.message] + messages
+
+            # Call the chat completions API
+            response = client.chat.completions.create(
                 model=agent.model,
+                messages=agent_messages,
                 temperature=temperature,
+                tools=tools if tools else NOT_GIVEN,
             )
 
-            # Check if run requires action
-            if run.status == "requires_action":
-                # Run the tools
-                tool_outputs = run_tools(run=run)
+            # Get the response message
+            response_message = response.choices[0].message
+
+            # Check if the model wants to call tools
+            if response_message.tool_calls:
+                # Run the tools and get outputs
+                tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
 
                 # Update tool token count
-                tool_token_count += sum(
-                    count_tokens(tool_output["output"]) for tool_output in tool_outputs
-                )
+                tool_token_count += sum(count_tokens(output) for output in tool_outputs)
 
-                # Submit the tool outputs
-                run = client.beta.threads.runs.submit_tool_outputs_and_poll(
-                    thread_id=thread.id, run_id=run.id, tool_outputs=tool_outputs
-                )
+                # Add the assistant's message with tool_calls to the messages
+                assistant_tool_message: ChatCompletionAssistantMessageParam = {
+                    "role": "assistant",
+                    "content": response_message.content,
+                    "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
+                }
+                messages.append(assistant_tool_message)
 
-                # Add tool outputs to the thread so it's visible for later rounds
-                client.beta.threads.messages.create(
-                    thread_id=thread.id,
-                    role="user",
-                    content="Tool Output:\n\n"
-                    + "\n\n".join(
-                        tool_output["output"] for tool_output in tool_outputs
-                    ),
-                )
+                # Add tool response messages
+                for tool_msg in tool_messages:
+                    messages.append(tool_msg)
 
-            # Check run status
-            if run.status != "completed":
-                raise ValueError(f"Run failed: {run.status}")
+                # Add tool outputs to discussion for visibility
+                tool_output_content = "\n\n".join(tool_outputs)
+                discussion.append({"agent": "Tool", "message": tool_output_content})
+
+                # Make another API call with tool results
+                agent_messages = [agent.message] + messages
+
+                response = client.chat.completions.create(
+                    model=agent.model,
+                    messages=agent_messages,
+                    temperature=temperature,
+                )
+                response_message = response.choices[0].message
+
+            # Extract the response content
+            response_content = response_message.content or ""
+
+            # Add response to messages and discussion
+            messages.append({"role": "assistant", "content": response_content})
+            discussion.append({"agent": agent.title, "message": response_content})
 
             # If final round, only team lead or team member responds
             if round_index == num_rounds:
                 break
-
-    # Get messages from the discussion
-    messages = get_messages(client=client, thread_id=thread.id)
-
-    # Convert messages to discussion format
-    discussion = convert_messages_to_discussion(
-        messages=messages, assistant_id_to_title=assistant_id_to_title
-    )
 
     # Count discussion tokens
     token_counts = count_discussion_tokens(discussion=discussion)
@@ -262,7 +254,7 @@ def run_meeting(
     # TODO: handle different models for different agents
     print_cost_and_time(
         token_counts=token_counts,
-        model=team_lead.model if meeting_type == "team" else team_member.model,
+        model=primary_model,
         elapsed_time=time.time() - start_time,
     )
 
@@ -276,3 +268,5 @@ def run_meeting(
     # Optionally, return summary
     if return_summary:
         return get_summary(discussion)
+
+    return None
