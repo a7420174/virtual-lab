@@ -1,5 +1,7 @@
 """The LLM agent class."""
 
+from openai.types.chat import ChatCompletionMessageParam
+
 
 class Agent:
     """An LLM agent."""
@@ -29,7 +31,7 @@ class Agent:
         )
 
     @property
-    def message(self) -> dict[str, str]:
+    def message(self) -> ChatCompletionMessageParam:
         """Returns the message for the agent in OpenAI API form."""
         return {
             "role": "system",
