@@ -14,7 +14,7 @@ model = "qwen3:8b"
 model_mini = "gpt-4o-mini-2024-07-18"
 
 # Discussion paths
-discussions_dir = Path("discussions")
+discussions_dir = Path("drive/MyDrive/test_colab/discussions")
 workflow_phases = [
     "team_selection",
     "project_specification",
