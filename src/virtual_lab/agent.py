@@ -60,7 +60,6 @@ class Agent:
         *,
         tools: Optional[List[object]] = None,
         mcp_servers: Optional[List[object]] = None,
-        guardrails: Optional[List[object]] = None,
         handoffs: Optional[List[object]] = None,
         name: Optional[str] = None,
     ):
@@ -73,7 +72,6 @@ class Agent:
 
         :param tools: Agents SDK function tools / hosted MCP tools, etc.
         :param mcp_servers: MCP server transports (stdio/http/sse) to attach.
-        :param guardrails: Optional guardrails for input/output/tool calls.
         :param handoffs: Optional handoffs to other agents.
         :param name: Optional explicit name; defaults to self.title.
         :return: agents.Agent instance.
@@ -93,7 +91,6 @@ class Agent:
             model=self.model,
             tools=tools or [],
             mcp_servers=mcp_servers or [],
-            guardrails=guardrails or [],
             handoffs=handoffs or [],
         )
 
