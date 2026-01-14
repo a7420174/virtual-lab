@@ -93,7 +93,7 @@ def run_meeting(
     api_key  = os.getenv("OPENAI_API_KEY", "dummy")
     timeouts = httpx.Timeout(connect=30.0, read=600.0, write=120.0, pool=30.0)
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
-    transport = httpx.HTTPTransport(retries=0, http2=False
+    transport = httpx.HTTPTransport(retries=0, http2=False)
 
     client = OpenAI(base_url=base_url, api_key=api_key, http_client=httpx.Client(timeout=timeouts, limits=limits, transport=transport))
 
