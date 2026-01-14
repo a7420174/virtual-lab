@@ -271,7 +271,7 @@ def print_cost_and_time(
     try:
         cost = compute_token_cost(
             model=model,
-            input_token_count=token_counts["input"]# + token_counts["tool"],
+            input_token_count=token_counts["input"],# + token_counts["tool"],
             output_token_count=token_counts["output"],
         )
         print(f"Cost: ${cost:.2f}")
