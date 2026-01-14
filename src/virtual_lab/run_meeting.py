@@ -1,6 +1,6 @@
 """Runs a meeting with LLM agents."""
 
-import os, time
+import os, time, httpx
 from pathlib import Path
 from typing import Literal
 
@@ -91,7 +91,9 @@ def run_meeting(
     # Set up client
     base_url = os.getenv("OPENAI_BASE_URL")
     api_key  = os.getenv("OPENAI_API_KEY", "dummy")
-    client = OpenAI(base_url=base_url, api_key=api_key)
+    timeouts = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
+    
+    client = OpenAI(base_url=base_url, api_key=api_key, http_client=httpx.Client(timeout=timeouts))
 
     # Set up team
     if meeting_type == "team":
