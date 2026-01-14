@@ -204,39 +204,44 @@ def run_meeting(
             # Get the response message
             response_message = response.choices[0].message
 
+            tool_calls = getattr(response_message, "tool_calls", []) or []
+
             # # Check if the model wants to call tools
-            # if response_message.tool_calls:
-            #     # Run the tools and get outputs
-            #     tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
+            if tool_calls:
+                # Add the assistant's message with tool_calls to the messages
+                assistant_tool_message: ChatCompletionAssistantMessageParam = {
+                    "role": "assistant",
+                    "content": response_message.content,
+                    "tool_calls": [tc.model_dump() for tc in tool_calls],  # type: ignore[misc]
+                }
+                messages.append(assistant_tool_message)
 
-            #     # Update tool token count
-            #     tool_token_count += sum(count_tokens(output) for output in tool_outputs)
+                for tc in tool_calls:
+                    tool_type = tc.type                # "mcp"
+                    call_id   = tc.id                  # 이 호출을 식별하는 ID (후속 메시지 연결용)
+                    name      = tc.function.name if hasattr(tc, "function") else None
+                    args_json = tc.function.arguments if hasattr(tc, "function") else "{}"
 
-            #     # Add the assistant's message with tool_calls to the messages
-            #     assistant_tool_message: ChatCompletionAssistantMessageParam = {
-            #         "role": "assistant",
-            #         "content": response_message.content,
-            #         "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
-            #     }
-            #     messages.append(assistant_tool_message)
+                    # arguments는 문자열(JSON)일 수 있으니 파싱
+                    import json
+                    try:
+                        args = json.loads(args_json) if isinstance(args_json, str) else args_json
+                    except json.JSONDecodeError:
+                        args = {}
 
-            #     # Add tool response messages
-            #     for tool_msg in tool_messages:
-            #         messages.append(tool_msg)
+                # Add tool outputs to discussion for visibility
+                tool_output_content = "\n\n".join(["MCP tool call:", tool_type, call_id, name, args])
+                discussion.append({"agent": "Tool", "message": tool_output_content})
 
-            #     # Add tool outputs to discussion for visibility
-            #     tool_output_content = "\n\n".join(tool_outputs)
-            #     discussion.append({"agent": "Tool", "message": tool_output_content})
+                # Make another API call with tool results
+                agent_messages = [agent.message] + messages
 
-            #     # Make another API call with tool results
-            #     agent_messages = [agent.message] + messages
-
-            #     response = client.chat.completions.create(
-            #         model=agent.model,
-            #         messages=agent_messages,
-            #         temperature=temperature,
-            #     )
-            #     response_message = response.choices[0].message
+                response = client.chat.completions.create(
+                    model=agent.model,
+                    messages=agent_messages,
+                    temperature=temperature,
+                )
+                response_message = response.choices[0].message
 
             # Extract the response content
             response_content = response_message.content or ""
@@ -251,9 +256,6 @@ def run_meeting(
 
     # Count discussion tokens
     token_counts = count_discussion_tokens(discussion=discussion)
-
-    # Add tool token count to total token count
-    token_counts["tool"] = tool_token_count
 
     # Print cost and time
     # TODO: handle different models for different agents
