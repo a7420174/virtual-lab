@@ -264,14 +264,14 @@ def print_cost_and_time(
     # Print token counts
     print(f"Input token count: {token_counts['input']:,}")
     print(f"Output token count: {token_counts['output']:,}")
-    print(f"Tool token count: {token_counts['tool']:,}")
+    # print(f"Tool token count: {token_counts['tool']:,}")
     print(f"Max token length: {token_counts['max']:,}")
 
     # Compute and print cost
     try:
         cost = compute_token_cost(
             model=model,
-            input_token_count=token_counts["input"] + token_counts["tool"],
+            input_token_count=token_counts["input"]# + token_counts["tool"],
             output_token_count=token_counts["output"],
         )
         print(f"Cost: ${cost:.2f}")
