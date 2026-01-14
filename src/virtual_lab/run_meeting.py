@@ -114,9 +114,13 @@ def _build_biomcp_integration(
         # Docs & quickstart: https://biomcp.org/
         mcp_servers.append(
             MCPServerStdio(
-                command="uv",
-                args=["run", "--with", "biomcp-python", "biomcp", "run"],
-                env=env or {},
+                params={
+                    "command": "uv",
+                    "args": ["run", "--with", "biomcp-python", "biomcp", "run"],
+                    # 선택: subprocess 환경변수 전달
+                    "env": env or {},
+                },
+                cache_tools_list=True,
             )
         )
     elif mode == "http":
