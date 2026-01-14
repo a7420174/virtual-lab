@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletio
 from tqdm import trange, tqdm
 
 from virtual_lab.agent import Agent
-from virtual_lab.constants import CONSISTENT_TEMPERATURE, PUBMED_TOOL_DESCRIPTION
+from virtual_lab.constants import CONSISTENT_TEMPERATURE, BIOMCP_TOOL_DESCRIPTION
 from virtual_lab.prompts import (
     individual_meeting_agent_prompt,
     individual_meeting_critic_prompt,
@@ -45,7 +45,7 @@ def run_meeting(
     contexts: tuple[str, ...] = (),
     num_rounds: int = 0,
     temperature: float = CONSISTENT_TEMPERATURE,
-    pubmed_search: bool = False,
+    biomcp: bool = False,
     return_summary: bool = False,
 ) -> str | None:
     """Runs a meeting with a LLM agents.
@@ -64,6 +64,7 @@ def run_meeting(
     :param num_rounds: The number of rounds of discussion.
     :param temperature: The sampling temperature.
     :param pubmed_search: Whether to include a PubMed search tool.
+    :param biomcp: Whether to include a BioMCP.
     :param return_summary: Whether to return the summary of the meeting.
     :return: The summary of the meeting (i.e., the last message) if return_summary is True, else None.
     """
@@ -109,7 +110,7 @@ def run_meeting(
 
     # Set up tools
     tools: list[ChatCompletionToolParam] | None = (
-        [ChatCompletionToolParam(**PUBMED_TOOL_DESCRIPTION)] if pubmed_search else None  # type: ignore[misc]
+        [ChatCompletionToolParam(**BIOMCP_TOOL_DESCRIPTION)] if biomcp else None  # type: ignore[misc]
     )
 
     # Set up tool token count
@@ -203,39 +204,39 @@ def run_meeting(
             # Get the response message
             response_message = response.choices[0].message
 
-            # Check if the model wants to call tools
-            if response_message.tool_calls:
-                # Run the tools and get outputs
-                tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
+            # # Check if the model wants to call tools
+            # if response_message.tool_calls:
+            #     # Run the tools and get outputs
+            #     tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
 
-                # Update tool token count
-                tool_token_count += sum(count_tokens(output) for output in tool_outputs)
+            #     # Update tool token count
+            #     tool_token_count += sum(count_tokens(output) for output in tool_outputs)
 
-                # Add the assistant's message with tool_calls to the messages
-                assistant_tool_message: ChatCompletionAssistantMessageParam = {
-                    "role": "assistant",
-                    "content": response_message.content,
-                    "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
-                }
-                messages.append(assistant_tool_message)
+            #     # Add the assistant's message with tool_calls to the messages
+            #     assistant_tool_message: ChatCompletionAssistantMessageParam = {
+            #         "role": "assistant",
+            #         "content": response_message.content,
+            #         "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
+            #     }
+            #     messages.append(assistant_tool_message)
 
-                # Add tool response messages
-                for tool_msg in tool_messages:
-                    messages.append(tool_msg)
+            #     # Add tool response messages
+            #     for tool_msg in tool_messages:
+            #         messages.append(tool_msg)
 
-                # Add tool outputs to discussion for visibility
-                tool_output_content = "\n\n".join(tool_outputs)
-                discussion.append({"agent": "Tool", "message": tool_output_content})
+            #     # Add tool outputs to discussion for visibility
+            #     tool_output_content = "\n\n".join(tool_outputs)
+            #     discussion.append({"agent": "Tool", "message": tool_output_content})
 
-                # Make another API call with tool results
-                agent_messages = [agent.message] + messages
+            #     # Make another API call with tool results
+            #     agent_messages = [agent.message] + messages
 
-                response = client.chat.completions.create(
-                    model=agent.model,
-                    messages=agent_messages,
-                    temperature=temperature,
-                )
-                response_message = response.choices[0].message
+            #     response = client.chat.completions.create(
+            #         model=agent.model,
+            #         messages=agent_messages,
+            #         temperature=temperature,
+            #     )
+            #     response_message = response.choices[0].message
 
             # Extract the response content
             response_content = response_message.content or ""
