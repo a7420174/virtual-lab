@@ -230,7 +230,7 @@ def run_meeting(
                         args = {}
 
                 # Add tool outputs to discussion for visibility
-                tool_output_content = "\n\n".join(["MCP tool call:", tool_type, call_id, name, args])
+                tool_output_content = "\n\n".join(["MCP tool call:", tool_type, call_id, name, str(args)])
                 discussion.append({"agent": "Tool", "message": tool_output_content})
 
                 # Make another API call with tool results
