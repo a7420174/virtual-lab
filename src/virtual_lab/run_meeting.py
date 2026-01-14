@@ -204,17 +204,21 @@ def run_meeting(
             # Get the response message
             response_message = response.choices[0].message
 
-            tool_calls = getattr(response_message, "tool_calls", []) or []
-
             # # Check if the model wants to call tools
-            if tool_calls:
-                # Add the assistant's message with tool_calls to the messages
-                assistant_tool_message: ChatCompletionAssistantMessageParam = {
-                    "role": "assistant",
-                    "content": response_message.content,
-                    "tool_calls": [tc.model_dump() for tc in tool_calls],  # type: ignore[misc]
-                }
-                messages.append(assistant_tool_message)
+            # if response_message.tool_calls:
+            #     # Run the tools and get outputs
+            #     tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
+
+            #     # Update tool token count
+            #     tool_token_count += sum(count_tokens(output) for output in tool_outputs)
+
+            #     # Add the assistant's message with tool_calls to the messages
+            #     assistant_tool_message: ChatCompletionAssistantMessageParam = {
+            #         "role": "assistant",
+            #         "content": response_message.content,
+            #         "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
+            #     }
+            #     messages.append(assistant_tool_message)
 
                 for tc in tool_calls:
                     tool_type = tc.type                # "mcp"
@@ -233,15 +237,15 @@ def run_meeting(
                 tool_output_content = "\n\n".join(["MCP tool call:", tool_type, call_id, name, str(args)])
                 discussion.append({"agent": "Tool", "message": tool_output_content})
 
-                # Make another API call with tool results
-                agent_messages = [agent.message] + messages
+            #     # Make another API call with tool results
+            #     agent_messages = [agent.message] + messages
 
-                response = client.chat.completions.create(
-                    model=agent.model,
-                    messages=agent_messages,
-                    temperature=temperature,
-                )
-                response_message = response.choices[0].message
+            #     response = client.chat.completions.create(
+            #         model=agent.model,
+            #         messages=agent_messages,
+            #         temperature=temperature,
+            #     )
+            #     response_message = response.choices[0].message
 
             # Extract the response content
             response_content = response_message.content or ""
@@ -256,6 +260,9 @@ def run_meeting(
 
     # Count discussion tokens
     token_counts = count_discussion_tokens(discussion=discussion)
+
+    # Add tool token count to total token count
+    token_counts["tool"] = tool_token_count
 
     # Print cost and time
     # TODO: handle different models for different agents
