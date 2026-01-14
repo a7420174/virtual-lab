@@ -166,3 +166,4 @@ cython_debug/
 
 # Papers
 nanobody_design/discussions/finetuning/papers
+src/virtual_lab/run_meeting.v1.py

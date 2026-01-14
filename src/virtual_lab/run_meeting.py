@@ -1,14 +1,25 @@
-"""Runs a meeting with LLM agents."""
+
+"""
+Runs a meeting with LLM agents using the OpenAI Agents SDK (Agent, Runner),
+and integrates optional BioMCP server(s).
+
+- Requires: openai-agents (Agents SDK)
+- Optional: biomcp-python (for stdio mode), or a hosted/HTTP BioMCP endpoint
+"""
 
 import os, time, httpx
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Dict, List, Tuple
 
-from openai import OpenAI, NOT_GIVEN
-from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionMessageParam, ChatCompletionToolParam
+# Agents SDK
+from agents import Runner, function_tool, RunConfig, ModelSettings
+from agents.mcp.server import MCPServerStdio, MCPServerStreamableHttp, MCPServerSse
+from agents.tool import HostedMCPTool
+
 from tqdm import trange, tqdm
 
-from virtual_lab.agent import Agent
+# Project-local modules
+from virtual_lab.agent import Agent  # <- uses new to_agents()
 from virtual_lab.constants import CONSISTENT_TEMPERATURE, PUBMED_TOOL_DESCRIPTION
 from virtual_lab.prompts import (
     individual_meeting_agent_prompt,
@@ -26,9 +37,109 @@ from virtual_lab.utils import (
     count_tokens,
     get_summary,
     print_cost_and_time,
-    run_tools,
     save_meeting,
 )
+
+# ---------------------------------------------------------------------
+# Example function tool (PubMed): Agents SDK recommends @function_tool
+# If you enable BioMCP, it already provides article/trial/variant tools,
+# so this can be turned off.
+# ---------------------------------------------------------------------
+@function_tool
+def pubmed_search(query: str, top_k: int = 5) -> str:
+    """
+    Simple PubMed search via NCBI E-utilities.
+    For production: add robust error handling, rate-limit, parameter validation.
+    """
+    try:
+        esearch = httpx.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+            params={"db": "pubmed", "term": query, "retmode": "json", "retmax": str(top_k)},
+            timeout=30.0,
+        )
+        esearch.raise_for_status()
+        ids = esearch.json().get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            return f"No PubMed results for query: {query}"
+
+        esummary = httpx.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+            params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            timeout=30.0,
+        )
+        esummary.raise_for_status()
+        result = esummary.json().get("result", {})
+        lines: List[str] = []
+        for pid in ids:
+            item = result.get(pid, {})
+            title = item.get("title") or "(no title)"
+            journal = item.get("fulljournalname") or item.get("source") or ""
+            pubdate = item.get("pubdate") or ""
+            lines.append(f"- {title} ({journal}, {pubdate}) https://pubmed.ncbi.nlm.nih.gov/{pid}/")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"PubMed search failed: {e}"
+
+
+def _build_agents_tools(pubmed_search_enabled: bool):
+    """
+    Compose the local function tools list for Agents SDK.
+    If BioMCP is used, you may set pubmed_search_enabled=False.
+    """
+    return [pubmed_search] if pubmed_search_enabled else []
+
+
+def _build_biomcp_integration(
+    mode: Literal["stdio", "http", "hosted"] = "stdio",
+    url: str | None = None,
+    env: dict | None = None,
+):
+    """
+    Configure BioMCP server(s) or hosted MCP tool.
+
+    mode:
+      - "stdio": launch BioMCP locally via uv + biomcp-python (recommended for dev).
+      - "http": connect to an externally reachable Streamable HTTP server.
+      - "hosted": let OpenAI Responses call a hosted MCP server via HostedMCPTool.
+
+    Returns:
+      mcp_servers: list of MCP server transports (stdio/http/sse)
+      hosted_tools: list of HostedMCPTool (only for 'hosted' mode)
+    """
+    mcp_servers = []
+    hosted_tools = []
+
+    if mode == "stdio":
+        # uv run --with biomcp-python biomcp run
+        # Docs & quickstart: https://biomcp.org/
+        mcp_servers.append(
+            MCPServerStdio(
+                command="uv",
+                args=["run", "--with", "biomcp-python", "biomcp", "run"],
+                env=env or {},
+            )
+        )
+    elif mode == "http":
+        if not url:
+            raise ValueError("HTTP mode requires biomcp_url")
+        mcp_servers.append(MCPServerStreamableHttp(server_url=url))
+    elif mode == "hosted":
+        if not url:
+            raise ValueError("Hosted mode requires biomcp server_url or label")
+        hosted_tools.append(
+            HostedMCPTool(
+                tool_config={
+                    "type": "mcp",
+                    "server_label": "biomcp",
+                    "server_url": url,
+                    "require_approval": "never",
+                }
+            )
+        )
+    else:
+        raise ValueError(f"Unsupported biomcp mode: {mode}")
+
+    return mcp_servers, hosted_tools
 
 
 def run_meeting(
@@ -37,37 +148,30 @@ def run_meeting(
     save_dir: Path,
     save_name: str = "discussion",
     team_lead: Agent | None = None,
-    team_members: tuple[Agent, ...] | None = None,
+    team_members: Tuple[Agent, ...] | None = None,
     team_member: Agent | None = None,
-    agenda_questions: tuple[str, ...] = (),
-    agenda_rules: tuple[str, ...] = (),
-    summaries: tuple[str, ...] = (),
-    contexts: tuple[str, ...] = (),
+    agenda_questions: Tuple[str, ...] = (),
+    agenda_rules: Tuple[str, ...] = (),
+    summaries: Tuple[str, ...] = (),
+    contexts: Tuple[str, ...] = (),
     num_rounds: int = 0,
     temperature: float = CONSISTENT_TEMPERATURE,
-    pubmed_search: bool = False,
+    pubmed_search_enabled: bool = False,  # default off when using BioMCP
     return_summary: bool = False,
+    # BioMCP options
+    use_biomcp: bool = False,
+    biomcp_mode: Literal["stdio", "http", "hosted"] = "stdio",
+    biomcp_url: str | None = None,
+    biomcp_env: dict | None = None,
 ) -> str | None:
-    """Runs a meeting with a LLM agents.
-
-    :param meeting_type: The type of meeting.
-    :param agenda: The agenda for the meeting.
-    :param save_dir: The directory to save the discussion.
-    :param save_name: The name of the discussion file that will be saved.
-    :param team_lead: The team lead for a team meeting (None for individual meeting).
-    :param team_members: The team members for a team meeting (None for individual meeting).
-    :param team_member: The team member for an individual meeting (None for team meeting).
-    :param agenda_questions: The agenda questions to answer by the end of the meeting.
-    :param agenda_rules: The rules for the meeting.
-    :param summaries: The summaries of previous meetings.
-    :param contexts: The contexts for the meeting.
-    :param num_rounds: The number of rounds of discussion.
-    :param temperature: The sampling temperature.
-    :param pubmed_search: Whether to include a PubMed search tool.
-    :param return_summary: Whether to return the summary of the meeting.
-    :return: The summary of the meeting (i.e., the last message) if return_summary is True, else None.
     """
-    # Validate meeting type
+    Runs a meeting with LLM agents using OpenAI Agents SDK (Agent, Runner),
+    with optional BioMCP integration.
+
+    Returns the summary of the meeting if return_summary is True, else None.
+    """
+
+    # --- Validate meeting type (same as previous) ---
     if meeting_type == "team":
         if team_lead is None or team_members is None or len(team_members) == 0:
             raise ValueError("Team meeting requires team lead and team members")
@@ -85,43 +189,47 @@ def run_meeting(
     else:
         raise ValueError(f"Invalid meeting type: {meeting_type}")
 
-    # Start timing the meeting
+    # --- Start timing ---
     start_time = time.time()
 
-    # Set up client
-    base_url = os.getenv("OPENAI_BASE_URL")
-    api_key  = os.getenv("OPENAI_API_KEY", "dummy")
-    timeouts = httpx.Timeout(connect=30.0, read=600.0, write=120.0, pool=30.0)
-    limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
-    transport = httpx.HTTPTransport(retries=0, http2=False)
-
-    client = OpenAI(base_url=base_url, api_key=api_key, http_client=httpx.Client(timeout=timeouts, limits=limits, transport=transport))
-
-    # Set up team
+    # --- Team setup ---
     if meeting_type == "team":
         assert team_lead is not None and team_members is not None
-        team: list[Agent] = [team_lead] + list(team_members)
+        team: List[Agent] = [team_lead] + list(team_members)
         primary_model = team_lead.model
     else:
         assert team_member is not None
         team = [team_member, SCIENTIFIC_CRITIC]
         primary_model = team_member.model
 
-    # Set up tools
-    tools: list[ChatCompletionToolParam] | None = (
-        [ChatCompletionToolParam(**PUBMED_TOOL_DESCRIPTION)] if pubmed_search else None  # type: ignore[misc]
-    )
+    # --- Tools & BioMCP ---
+    tools_for_agents = _build_agents_tools(pubmed_search_enabled=pubmed_search_enabled)
+    mcp_servers: List[object] = []
+    hosted_mcp_tools: List[object] = []
+    if use_biomcp:
+        mcp_servers, hosted_mcp_tools = _build_biomcp_integration(
+            mode=biomcp_mode, url=biomcp_url, env=biomcp_env
+        )
+        tools_for_agents = tools_for_agents + hosted_mcp_tools
 
-    # Set up tool token count
+    # --- Cache: virtual_lab.Agent -> agents.Agent via to_agents() ---
+    agents_cache: Dict[Agent, object] = {}
+
+    def get_agents_agent(v_agent: Agent):
+        if v_agent not in agents_cache:
+            # ✅ NEW: use Agent.to_agents(...) from the updated agent.py
+            agents_cache[v_agent] = v_agent.to_agents(
+                tools=tools_for_agents,
+                mcp_servers=mcp_servers,
+                name=getattr(v_agent, "title", None) or "Agent",
+            )
+        return agents_cache[v_agent]
+
+    # --- Discussion logs ---
     tool_token_count = 0
+    discussion: List[dict[str, str]] = []  # [{"agent": "...", "message": "..."}]
 
-    # Initialize discussion (list of agent/message dicts for output)
-    discussion: list[dict[str, str]] = []
-
-    # Initialize messages for API calls
-    messages: list[ChatCompletionMessageParam] = []
-
-    # Initial prompt for team meeting
+    # --- Initial team prompt (once) ---
     if meeting_type == "team":
         assert team_lead is not None and team_members is not None
         initial_content = team_meeting_start_prompt(
@@ -134,20 +242,17 @@ def run_meeting(
             contexts=contexts,
             num_rounds=num_rounds,
         )
-        messages.append({"role": "user", "content": initial_content})
         discussion.append({"agent": "User", "message": initial_content})
 
-    # Loop through rounds
+    # --- Rounds ---
     for round_index in trange(num_rounds + 1, desc="Rounds (+ Final Round)"):
         round_num = round_index + 1
 
-        # Loop through team and elicit responses
-        for agent in tqdm(team, desc="Team"):
-            # Prompt based on agent and round number
+        for v_agent in tqdm(team, desc="Team"):
+            # 1) Round-specific prompt selection
             if meeting_type == "team":
                 assert team_lead is not None
-                # Team meeting prompts
-                if agent == team_lead:
+                if v_agent == team_lead:
                     if round_index == 0:
                         prompt = team_meeting_team_lead_initial_prompt(team_lead=team_lead)
                     elif round_index == num_rounds:
@@ -165,12 +270,11 @@ def run_meeting(
                         )
                 else:
                     prompt = team_meeting_team_member_prompt(
-                        team_member=agent, round_num=round_num, num_rounds=num_rounds
+                        team_member=v_agent, round_num=round_num, num_rounds=num_rounds
                     )
             else:
                 assert team_member is not None
-                # Individual meeting prompts
-                if agent == SCIENTIFIC_CRITIC:
+                if v_agent == SCIENTIFIC_CRITIC:
                     prompt = individual_meeting_critic_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
                 else:
                     if round_index == 0:
@@ -185,92 +289,53 @@ def run_meeting(
                     else:
                         prompt = individual_meeting_agent_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
 
-            # Add prompt as user message
-            messages.append({"role": "user", "content": prompt})
+            # 2) Log user turn
             discussion.append({"agent": "User", "message": prompt})
 
-            # Build messages for this agent with their system prompt
-            agent_messages: list[ChatCompletionMessageParam] = [agent.message] + messages
-
-            # Call the chat completions API
-            response = client.chat.completions.create(
-                model=agent.model,
-                messages=agent_messages,
-                temperature=temperature,
-                tools=tools if tools else NOT_GIVEN,
+            # 3) Run this agent via Runner
+            a_agent = get_agents_agent(v_agent)
+            run_config = RunConfig(
+                model_settings=ModelSettings(temperature=temperature),
+            )
+            result = Runner.run_sync(
+                starting_agent=a_agent,
+                input=prompt,
+                run_config=run_config,
+                max_turns=10,  # adjust as needed
             )
 
-            # Get the response message
-            response_message = response.choices[0].message
+            # 4) Extract final response text
+            response_text = str(result.final_output or "")
 
-            # Check if the model wants to call tools
-            if response_message.tool_calls:
-                # Run the tools and get outputs
-                tool_outputs, tool_messages = run_tools(tool_calls=response_message.tool_calls)
+            # 5) Surface tool outputs (optional) & token accounting
+            for item in getattr(result, "new_items", []) or []:
+                t = getattr(item, "type", "")
+                if t == "tool_call_output_item":
+                    output = getattr(item, "output", "")
+                    if output:
+                        discussion.append({"agent": "Tool", "message": str(output)})
+                        tool_token_count += count_tokens(str(output))
 
-                # Update tool token count
-                tool_token_count += sum(count_tokens(output) for output in tool_outputs)
+            # 6) Append assistant response
+            discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
 
-                # Add the assistant's message with tool_calls to the messages
-                assistant_tool_message: ChatCompletionAssistantMessageParam = {
-                    "role": "assistant",
-                    "content": response_message.content,
-                    "tool_calls": [tc.model_dump() for tc in response_message.tool_calls],  # type: ignore[misc]
-                }
-                messages.append(assistant_tool_message)
-
-                # Add tool response messages
-                for tool_msg in tool_messages:
-                    messages.append(tool_msg)
-
-                # Add tool outputs to discussion for visibility
-                tool_output_content = "\n\n".join(tool_outputs)
-                discussion.append({"agent": "Tool", "message": tool_output_content})
-
-                # Make another API call with tool results
-                agent_messages = [agent.message] + messages
-
-                response = client.chat.completions.create(
-                    model=agent.model,
-                    messages=agent_messages,
-                    temperature=temperature,
-                )
-                response_message = response.choices[0].message
-
-            # Extract the response content
-            response_content = response_message.content or ""
-
-            # Add response to messages and discussion
-            messages.append({"role": "assistant", "content": response_content})
-            discussion.append({"agent": agent.title, "message": response_content})
-
-            # If final round, only team lead or team member responds
+            # 7) Final round: only team lead/member responds
             if round_index == num_rounds:
                 break
 
-    # Count discussion tokens
+    # --- Token/cost/time ---
     token_counts = count_discussion_tokens(discussion=discussion)
-
-    # Add tool token count to total token count
     token_counts["tool"] = tool_token_count
-
-    # Print cost and time
-    # TODO: handle different models for different agents
     print_cost_and_time(
         token_counts=token_counts,
         model=primary_model,
         elapsed_time=time.time() - start_time,
     )
 
-    # Save the discussion as JSON and Markdown
-    save_meeting(
-        save_dir=save_dir,
-        save_name=save_name,
-        discussion=discussion,
-    )
+    # --- Save ---
+    save_meeting(save_dir=save_dir, save_name=save_name, discussion=discussion)
 
-    # Optionally, return summary
+    # --- Optional summary ---
     if return_summary:
         return get_summary(discussion)
-
     return None
