@@ -3,7 +3,6 @@
 from typing import Iterable
 
 from virtual_lab.agent import Agent
-from virtual_lab.constants import DEFAULT_MODEL
 
 SYNTHESIS_PROMPT = "synthesize the points raised by each team member, make decisions regarding the agenda based on team member input, and ask follow-up questions to gather more information and feedback about how to better address the agenda"
 
