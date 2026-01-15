@@ -16,7 +16,6 @@ from virtual_lab.prompts import (
     individual_meeting_agent_prompt,
     individual_meeting_critic_prompt,
     individual_meeting_start_prompt,
-    SCIENTIFIC_CRITIC,
     team_meeting_start_prompt,
     team_meeting_team_lead_initial_prompt,
     team_meeting_team_lead_intermediate_prompt,
@@ -139,6 +138,7 @@ async def run_meeting_async(
     team_lead: Agent | None = None,
     team_members: Tuple[Agent, ...] | List[Agent] | None = None,
     team_member: Agent | None = None,
+    critic: Agent | None = None,
     agenda_questions: Tuple[str, ...] = (),
     agenda_rules: Tuple[str, ...] = (),
     summaries: Tuple[str, ...] = (),
@@ -168,6 +168,8 @@ async def run_meeting_async(
             raise ValueError("Individual meeting requires individual team member")
         if team_lead is not None or team_members is not None:
             raise ValueError("Individual meeting does not require team lead or team members")
+        if critic is None:
+            raise ValueError("Individual meeting requires a critic")
     else:
         raise ValueError(f"Invalid meeting type: {meeting_type}")
 
@@ -179,7 +181,7 @@ async def run_meeting_async(
         primary_model = team_lead.model
     else:
         assert team_member is not None
-        team = [team_member, SCIENTIFIC_CRITIC]
+        team = [team_member, critic]
         primary_model = team_member.model
 
     tools_for_agents = _build_agents_tools(pubmed_search_enabled=pubmed_search_enabled)
@@ -250,8 +252,8 @@ async def run_meeting_async(
                         )
                 else:
                     assert team_member is not None
-                    if v_agent == SCIENTIFIC_CRITIC:
-                        prompt = individual_meeting_critic_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
+                    if v_agent == critic:
+                        prompt = individual_meeting_critic_prompt(critic=critic, agent=team_member)
                     else:
                         if round_index == 0:
                             prompt = individual_meeting_start_prompt(
@@ -260,7 +262,7 @@ async def run_meeting_async(
                                 summaries=summaries, contexts=contexts,
                             )
                         else:
-                            prompt = individual_meeting_agent_prompt(critic=SCIENTIFIC_CRITIC, agent=team_member)
+                            prompt = individual_meeting_agent_prompt(critic=critic, agent=team_member)
 
                 discussion.append({"agent": "User", "message": prompt})
 
