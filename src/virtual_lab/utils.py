@@ -88,6 +88,8 @@ def run_pubmed_search(query: str, num_articles: int = 3, abstract_only: bool = F
     texts = []
     titles = []
     pmcids = []
+    
+    print("Found PMC IDs:", ','.join(pmcids_found))
 
     for pmcid in pmcids_found:
         # Break if reached desired number of articles
