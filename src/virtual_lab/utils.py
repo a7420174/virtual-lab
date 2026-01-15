@@ -37,7 +37,7 @@ def get_pubmed_central_article(pmcid: str, abstract_only: bool = False) -> tuple
     # Try to parse JSON
     try:
         article = response.json()
-    except json.JSONDecodeError:
+    except json.JSONDecodeError or requests.exceptions.JSONDecodeError:
         return None, None
 
     # Get document
