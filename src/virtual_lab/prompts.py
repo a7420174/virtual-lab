@@ -5,23 +5,6 @@ from typing import Iterable
 from virtual_lab.agent import Agent
 from virtual_lab.constants import DEFAULT_MODEL
 
-
-PRINCIPAL_INVESTIGATOR = Agent(
-    title="Principal Investigator",
-    expertise="running a science research lab",
-    goal="perform research in your area of expertise that maximizes the scientific impact of the work",
-    role="lead a team of experts to solve an important scientific problem, make key decisions about the project direction based on team member input, and manage the project timeline and resources",
-    model=DEFAULT_MODEL,
-)
-
-SCIENTIFIC_CRITIC = Agent(
-    title="Scientific Critic",
-    expertise="providing critical feedback for scientific research",
-    goal="ensure that proposed research projects and implementations are rigorous, detailed, feasible, and scientifically sound",
-    role="provide critical feedback to identify and correct all errors and demand that scientific answers that are maximally complete and detailed but simple and not overly complex",
-    model=DEFAULT_MODEL,
-)
-
 SYNTHESIS_PROMPT = "synthesize the points raised by each team member, make decisions regarding the agenda based on team member input, and ask follow-up questions to gather more information and feedback about how to better address the agenda"
 
 SUMMARY_PROMPT = "summarize the meeting in detail for future discussions, provide a specific recommendation regarding the agenda, and answer the agenda questions (if any) based on the discussion while strictly adhering to the agenda rules (if any)"
