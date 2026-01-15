@@ -34,10 +34,19 @@ def get_pubmed_central_article(pmcid: str, abstract_only: bool = False) -> tuple
     response = requests.get(text_url)
     response.raise_for_status()
 
+    if response.status_code != 200:
+        print(f"Error: HTTP {response.status_code}")
+        return None, None
+
+    if "application/json" not in response.headers.get("Content-Type", ""):
+        print("Error: Response is not JSON")
+        print(response.text[:500])  # 응답 내용 일부 확인
+        return None, None
+
     # Try to parse JSON
     try:
         article = response.json()
-    except json.JSONDecodeError or requests.exceptions.JSONDecodeError:
+    except json.JSONDecodeError:
         return None, None
 
     # Get document
