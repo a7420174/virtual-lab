@@ -1,6 +1,6 @@
 """Holds constants."""
 
-DEFAULT_MODEL = "gpt-oss:20b" # "gpt-5.2"
+DEFAULT_MODEL = "deepseek-v3.1:671b-cloud" # "gpt-5.2"
 
 # Prices in USD as of December 30, 2025 (https://openai.com/api/pricing/)
 MODEL_TO_INPUT_PRICE_PER_TOKEN = {
