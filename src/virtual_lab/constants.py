@@ -79,11 +79,3 @@ PUBMED_TOOL_DESCRIPTION = {
         },
     },
 }
-
-BIOMCP_TOOL_DESCRIPTION = {
-            "type": "mcp",
-            "server_label": "BioMCP",
-            "server_url": "http://localhost:8000/mcp",
-            "require_approval": "never"
-        }
-        
