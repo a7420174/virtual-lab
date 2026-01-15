@@ -192,7 +192,7 @@ async def run_meeting_async(
         )
         tools_for_agents = tools_for_agents + hosted_mcp_tools
 
-    # ✅ 여기가 핵심: MCP 서버 연결
+    # 여기가 핵심: MCP 서버 연결
     # HostedMCPTool만 쓰는 경우(connect 불필요)에는 mcp_servers가 빈 리스트일 수 있음
     await _connect_mcp_servers(mcp_servers)
 
@@ -267,7 +267,7 @@ async def run_meeting_async(
                 a_agent = get_agents_agent(v_agent)
                 run_config = RunConfig(model_settings=ModelSettings(temperature=temperature))
 
-                # ✅ 비동기 실행
+                # 비동기 실행
                 result = await Runner.run(
                     starting_agent=a_agent,
                     input=prompt,
@@ -292,7 +292,7 @@ async def run_meeting_async(
         token_counts["tool"] = tool_token_count
         print_cost_and_time(
             token_counts=token_counts,
-            model=primary_model,
+            model=primary_model.model,
             elapsed_time=time.time() - start_time,
         )
 
@@ -302,7 +302,7 @@ async def run_meeting_async(
         return None
 
     finally:
-        # ✅ 종료 시 MCP 서버 정리
+        # 종료 시 MCP 서버 정리
         await _cleanup_mcp_servers(mcp_servers)
 
 
