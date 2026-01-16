@@ -285,6 +285,16 @@ async def run_meeting_async(
                         if output:
                             discussion.append({"agent": "Tool", "message": str(output)})
                             tool_token_count += count_tokens(str(output))
+                    if not response_text and t == "message_output_item":
+                        content = getattr(item, "content", None)
+                        if isinstance(content, list):
+                            texts = [getattr(p, "text", "") for p in content if hasattr(p, "text")]
+                            if any(texts):
+                                response_text = "".join(texts).strip()
+                                break
+                        elif isinstance(content, str) and content.strip():
+                            response_text = content.strip()
+                            break
 
                 discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
                 if round_index == num_rounds:
