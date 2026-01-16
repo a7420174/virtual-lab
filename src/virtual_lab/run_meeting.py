@@ -73,6 +73,7 @@ async def _connect_mcp_servers(servers: list[object]) -> None:
     for s in servers:
         # 모든 MCPServer*는 async connect()를 제공합니다.
         await s.connect()
+        await s.list_tools() # Check if the server is connected
 
 async def _cleanup_mcp_servers(servers: list[object]) -> None:
     for s in servers:
