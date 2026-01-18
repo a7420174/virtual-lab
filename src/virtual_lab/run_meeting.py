@@ -111,6 +111,7 @@ def _build_biomcp_integration(
                 params={"url": url, "timeout": 30},
                 cache_tools_list=True,
                 max_retry_attempts=5,
+                client_session_timeout_seconds=30,
             )
         )
     elif mode == "hosted":
