@@ -73,7 +73,7 @@ async def _connect_mcp_servers(servers: list[object]) -> None:
     for s in servers:
         # 모든 MCPServer*는 async connect()를 제공합니다.
         await s.connect()
-        await s.list_tools() # Check if the server is connected
+        await print(s.list_tools()) # Check if the server is connected
 
 async def _cleanup_mcp_servers(servers: list[object]) -> None:
     for s in servers:
@@ -98,8 +98,10 @@ def _build_biomcp_integration(
                     "command": "uv",
                     "args": ["run", "--with", "biomcp-python", "biomcp", "run"],
                     "env": env or {},
+                    "timeout": 10,
                 },
                 cache_tools_list=True,
+                max_retry_attempts=3,
             )
         )
     elif mode == "http":
@@ -107,8 +109,9 @@ def _build_biomcp_integration(
             raise ValueError("HTTP mode requires biomcp_url")
         mcp_servers.append(
             MCPServerStreamableHttp(
-                params={"url": url},
+                params={"url": url, "timeout": 10},
                 cache_tools_list=True,
+                max_retry_attempts=3,
             )
         )
     elif mode == "hosted":
