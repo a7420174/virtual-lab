@@ -68,19 +68,30 @@ def pubmed_search(query: str, top_k: int = 5) -> str:
 def _build_agents_tools(pubmed_search_enabled: bool):
     return [pubmed_search] if pubmed_search_enabled else []
 
-# run_meeting.py 상단 어딘가에
-async def _connect_mcp_servers(servers: list[object]) -> None:
-    for s in servers:
-        # 모든 MCPServer*는 async connect()를 제공합니다.
-        await s.connect()
+async def _connect_mcp_servers(servers: list[object], max_concurrency: int = 4) -> None:
+    if not servers:
+        return
+    sem = asyncio.BoundedSemaphore(max_concurrency)
 
-async def _cleanup_mcp_servers(servers: list[object]) -> None:
-    for s in servers:
+    async def _one(s):
+        async with sem:
+            await s.connect()
+
+    await asyncio.gather(*(_one(s) for s in servers))
+
+async def _cleanup_mcp_servers(servers: list[object], max_concurrency: int = 4) -> None:
+    if not servers:
+        return
+    sem = asyncio.BoundedSemaphore(max_concurrency)
+
+    async def _one(s):
         try:
-            # 서버에 따라 cleanup()/close()가 구현되어 있습니다.
-            await s.cleanup()
+            async with sem:
+                await s.cleanup()
         except Exception:
             pass
+
+    await asyncio.gather(*(_one(s) for s in servers))
 
 
 def _build_biomcp_integration(
@@ -100,7 +111,7 @@ def _build_biomcp_integration(
                     "timeout": 30,
                 },
                 cache_tools_list=True,
-                max_retry_attempts=3,
+                max_retry_attempts=5,
             )
         )
     elif mode == "http":
@@ -155,6 +166,7 @@ async def run_meeting_async(
     biomcp_mode: Literal["stdio", "http", "hosted"] = "stdio",
     biomcp_url: str | None = None,
     biomcp_env: dict | None = None,
+    max_mcp_concurrency: int = 4,
 ) -> str | None:
 
     # (기존 유효성 검증/팀 구성 동일)
@@ -200,7 +212,7 @@ async def run_meeting_async(
 
     # 여기가 핵심: MCP 서버 연결
     # HostedMCPTool만 쓰는 경우(connect 불필요)에는 mcp_servers가 빈 리스트일 수 있음
-    await _connect_mcp_servers(mcp_servers)
+    await _connect_mcp_servers(mcp_servers, max_concurrency=max_mcp_concurrency)
 
     try:
         # --- 기존 라운드/러너 실행 로직 그대로 ---
@@ -319,7 +331,7 @@ async def run_meeting_async(
 
     finally:
         # 종료 시 MCP 서버 정리
-        await _cleanup_mcp_servers(mcp_servers)
+        await _cleanup_mcp_servers(mcp_servers, max_concurrency=max_mcp_concurrency)
 
 
 # ---------------------------------------------------------------------
