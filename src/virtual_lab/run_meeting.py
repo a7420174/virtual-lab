@@ -97,7 +97,7 @@ def _build_biomcp_integration(
                     "command": "uv",
                     "args": ["run", "--with", "biomcp-python", "biomcp", "run"],
                     "env": env or {},
-                    "timeout": 10,
+                    "timeout": 30,
                 },
                 cache_tools_list=True,
                 max_retry_attempts=3,
@@ -108,9 +108,9 @@ def _build_biomcp_integration(
             raise ValueError("HTTP mode requires biomcp_url")
         mcp_servers.append(
             MCPServerStreamableHttp(
-                params={"url": url, "timeout": 10},
+                params={"url": url, "timeout": 30},
                 cache_tools_list=True,
-                max_retry_attempts=3,
+                max_retry_attempts=5,
             )
         )
     elif mode == "hosted":
