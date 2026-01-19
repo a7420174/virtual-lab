@@ -167,6 +167,7 @@ async def run_meeting_async(
     biomcp_url: str | None = None,
     biomcp_env: dict | None = None,
     max_mcp_concurrency: int = 4,
+    max_token_limit: int = 8192,
 ) -> str | None:
 
     # (기존 유효성 검증/팀 구성 동일)
@@ -283,7 +284,7 @@ async def run_meeting_async(
                 discussion.append({"agent": "User", "message": prompt})
 
                 a_agent = get_agents_agent(v_agent)
-                run_config = RunConfig(model_settings=ModelSettings(temperature=temperature))
+                run_config = RunConfig(model_settings=ModelSettings(temperature=temperature, max_tokens=max_token_limit))
 
                 # 비동기 실행
                 result = await Runner.run(
