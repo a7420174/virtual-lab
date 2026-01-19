@@ -167,7 +167,7 @@ async def run_meeting_async(
     biomcp_url: str | None = None,
     biomcp_env: dict | None = None,
     max_mcp_concurrency: int = 4,
-    max_token_limit: int = 8192,
+    max_token_limit: int | None = None,
 ) -> str | None:
 
     # (기존 유효성 검증/팀 구성 동일)
