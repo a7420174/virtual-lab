@@ -15,6 +15,7 @@ class Agent:
         goal: str,
         role: str,
         model: str,
+        model_settings: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initializes the agent.
@@ -30,6 +31,7 @@ class Agent:
         self.goal = goal
         self.role = role
         self.model = model
+        self.model_settings = model_settings or {}
 
     # ----------------------------
     # Prompt & system message
@@ -89,6 +91,7 @@ class Agent:
             name=name or self.title,
             instructions=self.prompt,
             model=self.model,
+            model_settings=self.model_settings,
             tools=tools or [],
             mcp_servers=mcp_servers or [],
             handoffs=handoffs or [],
@@ -99,8 +102,7 @@ class Agent:
     # ----------------------------
     def __hash__(self) -> int:
         """Returns the hash of the agent."""
-        return hash((self.title, self.expertise, self.goal, self.role, self.model))
-
+        return hash((self.title, self.expertise, self.goal, self.role, self.model, self.model_settings))
     def __eq__(self, other: object) -> bool:
         """Checks if the agent is equal to another agent (based on all fields)."""
         if not isinstance(other, Agent):
@@ -111,6 +113,7 @@ class Agent:
             and self.goal == other.goal
             and self.role == other.role
             and self.model == other.model
+            and self.model_settings == other.model_settings
         )
 
     def __str__(self) -> str:
