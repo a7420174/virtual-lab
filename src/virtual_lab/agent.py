@@ -81,6 +81,7 @@ class Agent:
         try:
             # Lazy import to avoid hard dependency when not using Agents SDK here.
             from agents import Agent as AgentsAgent  # type: ignore
+            from agents import ModelSettings
         except Exception as e:
             raise RuntimeError(
                 "OpenAI Agents SDK (`openai-agents`) is required for to_agents(). "
@@ -91,7 +92,7 @@ class Agent:
             name=name or self.title,
             instructions=self.prompt,
             model=self.model,
-            model_settings=self.model_settings,
+            model_settings=ModelSettings(**self.model_settings),
             tools=tools or [],
             mcp_servers=mcp_servers or [],
             handoffs=handoffs or [],
