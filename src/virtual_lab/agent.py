@@ -102,7 +102,8 @@ class Agent:
     # ----------------------------
     def __hash__(self) -> int:
         """Returns the hash of the agent."""
-        return hash((self.title, self.expertise, self.goal, self.role, self.model, self.model_settings))
+        return hash((self.title, self.expertise, self.goal, self.role, self.model))
+
     def __eq__(self, other: object) -> bool:
         """Checks if the agent is equal to another agent (based on all fields)."""
         if not isinstance(other, Agent):
@@ -113,7 +114,6 @@ class Agent:
             and self.goal == other.goal
             and self.role == other.role
             and self.model == other.model
-            and self.model_settings == other.model_settings
         )
 
     def __str__(self) -> str:
