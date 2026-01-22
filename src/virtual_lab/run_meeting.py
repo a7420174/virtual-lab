@@ -293,14 +293,14 @@ async def run_meeting_async(
 
                 a_agent = get_agents_agent(v_agent)
 
-                # 비동기 실행
                 prompt_think = (
-                    "YOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
+                    f"PROMPT:\n{prompt}\n\n"
+                    "CONTEXT:\nYOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
                     " - thought: string\n"
                     " - thoughtNumber: integer\n"
                     " - totalThoughts: integer\n"
                     " - nextThoughtNeeded: boolean\n\n"
-                    f"prompt:\n{prompt}"
+                    "Use the 'thought' field to record your structured, sequential thoughts in response to PROMPT."
                 )
                 
 
