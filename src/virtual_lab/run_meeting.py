@@ -292,40 +292,21 @@ async def run_meeting_async(
                     initial_content = ""
 
                 a_agent = get_agents_agent(v_agent)
-                run_config_think = RunConfig(
-                    model_settings=ModelSettings(
-                        tool_choice=MCPToolChoice(server_label="biomcp", name="think"),
-                        temperature=temperature, 
-                        max_tokens=max_token_limit,
-                        parallel_tool_calls=False,
-                    )
-                )
 
                 # 비동기 실행
-                result_think = await Runner.run(
-                    starting_agent=a_agent,
-                    input=prompt,
-                    run_config=run_config_think,
-                    max_turns=5,
-                    previous_response_id=previous_response_id,
-                    auto_previous_response_id=True,
+                prompt_think = (
+                    "YOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
+                    " - thought: string\n"
+                    " - thoughtNumber: integer\n"
+                    " - totalThoughts: integer\n"
+                    " - nextThoughtNeeded: boolean\n\n"
+                    f"prompt:\n{prompt}"
                 )
-
-                response_text = str(result_think.final_output or "")
-                for item in getattr(result_think, "new_items", []) or []:
-                    t = getattr(item, "type", "")
-                    if t == "tool_call_output_item":
-                        output = getattr(item, "output", "")
-                        if output:
-                            discussion.append({"agent": "Tool", "message": str(output)})
-                            tool_token_count += count_tokens(str(output))
-
-                discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
-                previous_response_id = result_think.last_response_id
+                
 
                 run_config = RunConfig(
                     model_settings=ModelSettings(
-                        tool_choice="required",
+                        tool_choice="auto",
                         temperature=temperature, 
                         max_tokens=max_token_limit,
                         parallel_tool_calls=False,
@@ -335,7 +316,7 @@ async def run_meeting_async(
                 # 비동기 실행
                 result = await Runner.run(
                     starting_agent=a_agent,
-                    input=prompt,
+                    input=prompt_think,
                     run_config=run_config,
                     max_turns=10,
                     previous_response_id=previous_response_id,
