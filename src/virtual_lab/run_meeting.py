@@ -231,7 +231,7 @@ async def run_meeting_async(
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
         
-        session = SQLiteSession("conversation", save_dir / "meetings.db")
+        session = SQLiteSession("conversation")
         initial_content = ""
 
         if meeting_type == "team":
