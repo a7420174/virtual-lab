@@ -231,7 +231,7 @@ async def run_meeting_async(
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
         
-        session = SQLiteSession("conversation")
+        session = SQLiteSession("conversation", save_dir / "meetings.db")
         initial_content = ""
 
         if meeting_type == "team":
@@ -287,7 +287,7 @@ async def run_meeting_async(
 
                 discussion.append({"agent": "User", "message": prompt})
                 
-                if previous_response_id is None and initial_content:
+                if initial_content:
                     prompt = initial_content + "\n\n" + prompt
                     initial_content = ""
 
@@ -332,7 +332,6 @@ async def run_meeting_async(
                             tool_token_count += count_tokens(str(output))
 
                 discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
-                previous_response_id = result.last_response_id
 
                 if round_index == num_rounds:
                     break
