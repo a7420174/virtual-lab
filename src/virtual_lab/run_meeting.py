@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Literal, Dict, List, Tuple
 
 from agents import Runner, function_tool, RunConfig, ModelSettings
-from agents.mcp.server import MCPServerStdio, MCPServerStreamableHttp, MCPServerSse
+from agents.mcp.server import MCPServerStdio, MCPServerStreamableHttp
 from agents.tool import HostedMCPTool
+from agents.model_settings import MCPToolChoice
 from tqdm import trange, tqdm
 
 from virtual_lab.agent import Agent  # <- uses new to_agents()
@@ -229,6 +230,9 @@ async def run_meeting_async(
 
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
+        
+        previous_response_id = None
+        initial_content = ""
 
         if meeting_type == "team":
             assert team_lead is not None and team_members is not None
@@ -282,9 +286,51 @@ async def run_meeting_async(
                             prompt = individual_meeting_agent_prompt(critic=critic, agent=team_member)
 
                 discussion.append({"agent": "User", "message": prompt})
+                
+                if previous_response_id is None and initial_content:
+                    prompt = initial_content + "\n\n" + prompt
+                    initial_content = ""
 
                 a_agent = get_agents_agent(v_agent)
-                run_config = RunConfig(model_settings=ModelSettings(temperature=temperature, max_tokens=max_token_limit))
+                run_config_think = RunConfig(
+                    model_settings=ModelSettings(
+                        tool_choice=MCPToolChoice(server_label="biomcp", name="think"),
+                        temperature=temperature, 
+                        max_tokens=max_token_limit,
+                        parallel_tool_calls=False,
+                    )
+                )
+
+                # 비동기 실행
+                result_think = await Runner.run(
+                    starting_agent=a_agent,
+                    input=prompt,
+                    run_config=run_config_think,
+                    max_turns=5,
+                    previous_response_id=previous_response_id,
+                    auto_previous_response_id=True,
+                )
+
+                response_text = str(result_think.final_output or "")
+                for item in getattr(result_think, "new_items", []) or []:
+                    t = getattr(item, "type", "")
+                    if t == "tool_call_output_item":
+                        output = getattr(item, "output", "")
+                        if output:
+                            discussion.append({"agent": "Tool", "message": str(output)})
+                            tool_token_count += count_tokens(str(output))
+
+                discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
+                previous_response_id = result_think.last_response_id
+
+                run_config = RunConfig(
+                    model_settings=ModelSettings(
+                        tool_choice="required",
+                        temperature=temperature, 
+                        max_tokens=max_token_limit,
+                        parallel_tool_calls=False,
+                    )
+                )
 
                 # 비동기 실행
                 result = await Runner.run(
@@ -292,6 +338,8 @@ async def run_meeting_async(
                     input=prompt,
                     run_config=run_config,
                     max_turns=10,
+                    previous_response_id=previous_response_id,
+                    auto_previous_response_id=True,
                 )
 
                 response_text = str(result.final_output or "")
@@ -302,18 +350,10 @@ async def run_meeting_async(
                         if output:
                             discussion.append({"agent": "Tool", "message": str(output)})
                             tool_token_count += count_tokens(str(output))
-                    if not response_text and t == "message_output_item":
-                        content = getattr(item, "content", None)
-                        if isinstance(content, list):
-                            texts = [getattr(p, "text", "") for p in content if hasattr(p, "text")]
-                            if any(texts):
-                                response_text = "".join(texts).strip()
-                                break
-                        elif isinstance(content, str) and content.strip():
-                            response_text = content.strip()
-                            break
 
                 discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
+                previous_response_id = result.last_response_id
+
                 if round_index == num_rounds:
                     break
 
