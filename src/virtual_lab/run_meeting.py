@@ -5,7 +5,7 @@ import os, time, httpx
 from pathlib import Path
 from typing import Literal, Dict, List, Tuple
 
-from agents import Runner, function_tool, RunConfig, ModelSettings
+from agents import Runner, function_tool, RunConfig, ModelSettings, SQLiteSession
 from agents.mcp.server import MCPServerStdio, MCPServerStreamableHttp
 from agents.tool import HostedMCPTool
 from agents.model_settings import MCPToolChoice
@@ -231,7 +231,7 @@ async def run_meeting_async(
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
         
-        previous_response_id = None
+        session = SQLiteSession("conversation")
         initial_content = ""
 
         if meeting_type == "team":
@@ -293,15 +293,15 @@ async def run_meeting_async(
 
                 a_agent = get_agents_agent(v_agent)
 
-                prompt_think = (
-                    f"PROMPT:\n{prompt}\n\n"
-                    "CONTEXT:\nYOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
-                    " - thought: string\n"
-                    " - thoughtNumber: integer\n"
-                    " - totalThoughts: integer\n"
-                    " - nextThoughtNeeded: boolean\n\n"
-                    "Use the 'thought' field to record your structured, sequential thoughts in response to PROMPT."
-                )
+            # prompt_think = (
+            #     f"PROMPT:\n{prompt}\n\n"
+            #     "CONTEXT:\nYOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
+            #     " - thought: string\n"
+            #     " - thoughtNumber: integer\n"
+            #     " - totalThoughts: integer\n"
+            #     " - nextThoughtNeeded: boolean\n\n"
+            #     "Use the 'thought' field to record your structured, sequential thoughts in response to PROMPT."
+            # )
                 
 
                 run_config = RunConfig(
@@ -316,11 +316,10 @@ async def run_meeting_async(
                 # 비동기 실행
                 result = await Runner.run(
                     starting_agent=a_agent,
-                    input=prompt_think,
+                    input=prompt,
                     run_config=run_config,
                     max_turns=10,
-                    previous_response_id=previous_response_id,
-                    auto_previous_response_id=True,
+                    session=session,
                 )
 
                 response_text = str(result.final_output or "")
