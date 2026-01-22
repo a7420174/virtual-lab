@@ -231,7 +231,7 @@ async def run_meeting_async(
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
         
-        session = SQLiteSession("conversation")
+        session = SQLiteSession(f"conversation_{int(start_time * 1000)}_{os.getpid()}")
         initial_content = ""
 
         if meeting_type == "team":
