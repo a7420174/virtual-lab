@@ -318,7 +318,7 @@ async def run_meeting_async(
                     starting_agent=a_agent,
                     input=prompt,
                     run_config=run_config,
-                    max_turns=10,
+                    max_turns=20,
                     session=session,
                 )
 
