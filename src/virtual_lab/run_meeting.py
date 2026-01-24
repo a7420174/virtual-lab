@@ -54,6 +54,20 @@ async def _cleanup_mcp_servers(servers: list[object], max_concurrency: int = 4) 
             pass
 
     await asyncio.gather(*(_one(s) for s in servers))
+    
+async def _clear_server_cache(servers: list[object], max_concurrency: int = 4) -> None:
+    if not servers:
+        return
+    sem = asyncio.BoundedSemaphore(max_concurrency)
+
+    async def _one(s):
+        try:
+            async with sem:
+                await s.invalidate_tools_cache()
+        except Exception:
+            pass
+
+    await asyncio.gather(*(_one(s) for s in servers))
 
 
 def _build_biomcp_integration(
@@ -279,6 +293,8 @@ async def run_meeting_async(
                             tool_token_count += count_tokens(str(output))
 
                 discussion.append({"agent": getattr(v_agent, "title", "Assistant"), "message": response_text})
+                
+                await _clear_server_cache(mcp_servers, max_concurrency=max_mcp_concurrency)
 
                 if round_index == num_rounds:
                     break
