@@ -197,7 +197,7 @@ def team_meeting_team_member_prompt(
     :return: The prompt for the team member.
     """
     return (
-        f"{team_member}, please provide your thoughts on the discussion (round {round_num} of {num_rounds}). "
+        f"{team_member}, please call BioMCP tools and provide your thoughts on the discussion (round {round_num} of {num_rounds}). "
         f'If you do not have anything new or relevant to add, you may say "pass". '
         f"Remember that you can and should (politely) disagree with other team members if you have a different perspective."
     )

@@ -293,17 +293,6 @@ async def run_meeting_async(
 
                 a_agent = get_agents_agent(v_agent)
 
-            # prompt_think = (
-            #     f"PROMPT:\n{prompt}\n\n"
-            #     "CONTEXT:\nYOU MUST call the MCP tool 'think' with the REQUIRED fields exactly before calling other MCP tools:\n"
-            #     " - thought: string\n"
-            #     " - thoughtNumber: integer\n"
-            #     " - totalThoughts: integer\n"
-            #     " - nextThoughtNeeded: boolean\n\n"
-            #     "Use the 'thought' field to record your structured, sequential thoughts in response to PROMPT."
-            # )
-                
-
                 run_config = RunConfig(
                     model_settings=ModelSettings(
                         tool_choice="auto",
@@ -364,12 +353,13 @@ def run_meeting(*args, **kwargs):
     """
     try:
         loop = asyncio.get_running_loop()
-        if loop.is_running():
-            raise RuntimeError(
-                "An event loop is already running. In notebooks, please call:\n"
-                "    await run_meeting_async(...)\n"
-            )
     except RuntimeError:
-        # No running loop: safe to run
-        pass
+        loop = None
+
+    if loop and loop.is_running():
+        raise RuntimeError(
+            "An event loop is already running. In notebooks, please call:\n"
+            " await run_meeting_async(...)\n"
+        )
+
     return asyncio.run(run_meeting_async(*args, **kwargs))
