@@ -5,10 +5,9 @@ import os, time, httpx
 from pathlib import Path
 from typing import Literal, Dict, List, Tuple
 
-from agents import Runner, function_tool, RunConfig, ModelSettings, SQLiteSession
+from agents import Runner, RunConfig, ModelSettings, SQLiteSession
 from agents.mcp.server import MCPServerStdio, MCPServerStreamableHttp
 from agents.tool import HostedMCPTool
-from agents.model_settings import MCPToolChoice
 from tqdm import trange, tqdm
 
 from virtual_lab.agent import Agent  # <- uses new to_agents()
@@ -30,44 +29,6 @@ from virtual_lab.utils import (
     print_cost_and_time,
     save_meeting,
 )
-
-@function_tool
-def pubmed_search(query: str, top_k: int = 5) -> str:
-    """
-    Simple PubMed search via NCBI E-utilities.
-    For production: add robust error handling, rate-limit, parameter validation.
-    """
-    try:
-        esearch = httpx.get(
-            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-            params={"db": "pubmed", "term": query, "retmode": "json", "retmax": str(top_k)},
-            timeout=30.0,
-        )
-        esearch.raise_for_status()
-        ids = esearch.json().get("esearchresult", {}).get("idlist", [])
-        if not ids:
-            return f"No PubMed results for query: {query}"
-
-        esummary = httpx.get(
-            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-            params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
-            timeout=30.0,
-        )
-        esummary.raise_for_status()
-        result = esummary.json().get("result", {})
-        lines: List[str] = []
-        for pid in ids:
-            item = result.get(pid, {})
-            title = item.get("title") or "(no title)"
-            journal = item.get("fulljournalname") or item.get("source") or ""
-            pubdate = item.get("pubdate") or ""
-            lines.append(f"- {title} ({journal}, {pubdate}) https://pubmed.ncbi.nlm.nih.gov/{pid}/")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"PubMed search failed: {e}"
-
-def _build_agents_tools(pubmed_search_enabled: bool):
-    return [pubmed_search] if pubmed_search_enabled else []
 
 async def _connect_mcp_servers(servers: list[object], max_concurrency: int = 4) -> None:
     if not servers:
@@ -161,7 +122,6 @@ async def run_meeting_async(
     contexts: Tuple[str, ...] = (),
     num_rounds: int = 0,
     temperature: float = CONSISTENT_TEMPERATURE,
-    pubmed_search_enabled: bool = False,
     return_summary: bool = False,
     use_biomcp: bool = False,
     biomcp_mode: Literal["stdio", "http", "hosted"] = "stdio",
@@ -202,7 +162,6 @@ async def run_meeting_async(
         team = [team_member, critic]
         primary_model = team_member.model
 
-    tools_for_agents = _build_agents_tools(pubmed_search_enabled=pubmed_search_enabled)
     
     mcp_servers: List[object] = []
     hosted_mcp_tools: List[object] = []
@@ -210,7 +169,6 @@ async def run_meeting_async(
         mcp_servers, hosted_mcp_tools = _build_biomcp_integration(
             mode=biomcp_mode, url=biomcp_url, env=biomcp_env
         )
-        tools_for_agents = tools_for_agents + hosted_mcp_tools
 
     # 여기가 핵심: MCP 서버 연결
     # HostedMCPTool만 쓰는 경우(connect 불필요)에는 mcp_servers가 빈 리스트일 수 있음
@@ -222,7 +180,7 @@ async def run_meeting_async(
         def get_agents_agent(v_agent: Agent):
             if v_agent not in agents_cache:
                 agents_cache[v_agent] = v_agent.to_agents(
-                    tools=tools_for_agents,
+                    tools=hosted_mcp_tools,
                     mcp_servers=mcp_servers,     # 이미 connect() 완료된 서버
                     name=getattr(v_agent, "title", None) or "Agent",
                 )
