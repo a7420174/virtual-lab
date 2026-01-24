@@ -195,7 +195,7 @@ async def run_meeting_async(
             if v_agent not in agents_cache:
                 agents_cache[v_agent] = v_agent.to_agents(
                     tools=hosted_mcp_tools,
-                    mcp_servers=mcp_servers,     # 이미 connect() 완료된 서버
+                    mcp_servers=mcp_servers if v_agent != team_lead else [],
                     name=getattr(v_agent, "title", None) or "Agent",
                 )
             return agents_cache[v_agent]
