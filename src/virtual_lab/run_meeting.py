@@ -143,6 +143,7 @@ async def run_meeting_async(
     biomcp_env: dict | None = None,
     max_mcp_concurrency: int = 4,
     max_token_limit: int | None = None,
+    session: SQLiteSession | None = None,
 ) -> str | None:
 
     # (기존 유효성 검증/팀 구성 동일)
@@ -202,8 +203,8 @@ async def run_meeting_async(
 
         tool_token_count = 0
         discussion: List[dict[str, str]] = []
-        
-        session = SQLiteSession(f"conversation_{int(start_time * 1000)}_{os.getpid()}")
+
+        session = session if session is not None else SQLiteSession(f"conversation_{int(start_time * 1000)}_{os.getpid()}")
         initial_content = ""
 
         if meeting_type == "team":
